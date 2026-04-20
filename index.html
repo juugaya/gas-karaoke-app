@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
+  <style>
+    body {
+      background-color: #f4f7f9;
+      padding: 15px;
+      font-family: "Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN",
+                   "Hiragino Sans", Meiryo, sans-serif;
+    }
+    .container { max-width: 800px; margin: 0 auto; }
+    .done-row { background-color: #f0f0f0 !important; text-decoration: line-through; color: #aaa; }
+    .ranking-card { border: 2px solid #ff3860; border-radius: 8px; overflow: hidden; background: white; }
+    .ranking-title { background: #ff3860; color: white; padding: 10px; font-weight: bold; }
+    .tabs-container { overflow-x: auto; white-space: nowrap; margin-bottom: 10px; border-bottom: 1px solid #dbdbdb; background: #fff; padding: 5px; border-radius: 4px; }
+    .tab-item { display: inline-block; padding: 8px 15px; cursor: pointer; color: #4a4a4a; border-bottom: 2px solid transparent; }
+    .tab-item.is-active { color: #3273dc; border-bottom: 2px solid #3273dc; font-weight: bold; }
+    .vote-btn { min-width: 70px; }
+  </style>
+</head>
+
+<body>
+  <div class="container box">
+    <h1 class="title is-4 has-text-centered">🎤 <?= ssName ?></h1>
+
+    <!-- 追加フォーム -->
+    <div class="field has-addons">
+      <div class="control">
+        <div class="select">
+          <select id="artistInput">
+            <option>STU48</option><option>AKB48</option><option>SKE48</option><option>NMB48</option><option>HKT48</option>
+            <option>NGT48</option><option>乃木坂46</option><option>欅坂46</option><option>櫻坂46</option>
+            <option>けやき坂46</option><option>日向坂46</option><option>=LOVE</option><option>≠ME</option><option>その他</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="control is-expanded">
+        <input id="titleInput" class="input" type="text" placeholder="歌ってほしい曲名を入力...">
+      </div>
+
+      <div class="control">
+        <button class="button is-link" onclick="addNewSong()">追加</button>
+      </div>
+    </div>
+
+    <!-- ランキング -->
+    <div class="ranking-card mt-5">
+      <div class="ranking-title level is-mobile m-0">
+        <div class="level-left"><span>🔥 リクエスト TOP</span></div>
+        <div class="level-right">
+          <div class="buttons px-2">
+            <button class="button is-small is-danger is-inverted is-outlined" onclick="resetVotes()">全リセット</button>
+            <div class="buttons has-addons ml-2">
+              <button class="button is-small is-white is-outlined" onclick="changeCount(5)">5</button>
+              <button class="button is-small is-white is-outlined" onclick="changeCount(10)">10</button>
+              <button class="button is-small is-white is-outlined" onclick="changeCount(30)">30</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="p-2">
+        <table class="table is-fullwidth is-narrow is-hoverable">
+          <tbody id="topList"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <hr>
+
+    <h2 class="subtitle is-6 mb-2">📂 アーティスト別リスト（タブで切替）</h2>
+    <div class="tabs-container" id="tabContainer"></div>
+
+    <!-- 🔥 ソート切替ボタン -->
+    <div class="has-text-right mb-2">
+      <button class="button is-small is-info is-light" onclick="toggleSortOrder()">
+        並び替え：<span id="sortLabel">いいね順（多→少）</span>
+      </button>
+    </div>
+
+    <div id="listArea">データを読み込み中...</div>
+  </div>
+
+  <script>
+    let currentDisplayCount = 10;
+    let lastData = null;
+    let currentArtistFilter = "STU48";
+    let lastDeletedSong = null;
+    let sortOrder = "desc"; // 🔥 追加：ソート順
+
+    window.onload = () => google.script.run.withSuccessHandler(renderList).getSongData();
+
+    function changeCount(num) {
+      currentDisplayCount = num;
+      if (lastData) renderList(lastData);
+    }
+
+    function filterByArtist(artist) {
+      currentArtistFilter = artist;
+      if (lastData) renderList(lastData);
+    }
+
+    function addNewSong() {
+      const art = document.getElementById('artistInput').value;
+      const tit = document.getElementById('titleInput').value;
+      if (!tit) return;
+      currentArtistFilter = art;
+      google.script.run.withSuccessHandler(renderList).addSong(art, tit);
+      document.getElementById('titleInput').value = "";
+    }
+
+    function resetVotes() {
+      if (confirm("全ての投票数を0にリセットしますか？")) {
+        document.getElementById('listArea').innerHTML = "リセット中...";
+        google.script.run.withSuccessHandler(renderList).resetAllVotes();
+      }
+    }
+
+    /* -------------------------
+       🔥 削除処理 + Undo
+    ------------------------- */
+    function deleteSong(title) {
+      if (!confirm(`「${title}」を削除しますか？`)) return;
+
+      const song = lastData.find(s => s.title === title);
+      if (song) lastDeletedSong = { ...song };
+
+      google.script.run.withSuccessHandler(data => {
+        renderList(data);
+        showUndoNotification();
+      }).deleteSong(title);
+    }
+
+    function showUndoNotification() {
+      const area = document.getElementById("listArea");
+
+      const div = document.createElement("div");
+      div.className = "notification is-warning";
+      div.innerHTML = `
+        「${lastDeletedSong.title}」を削除しました。
+        <button class="button is-small is-light" onclick="undoDelete()">元に戻す</button>
+      `;
+
+      area.prepend(div);
+
+      setTimeout(() => div.remove(), 5000);
+    }
+
+    function undoDelete() {
+      if (!lastDeletedSong) return;
+
+      const s = lastDeletedSong;
+
+      google.script.run.withSuccessHandler(() => {
+        google.script.run.withSuccessHandler(renderList)
+          .restoreSongData(s.title, s.votes, s.isDone);
+      }).addSong(s.artist, s.title);
+
+      lastDeletedSong = null;
+    }
+
+    /* -------------------------
+       🔥 ソート切替
+    ------------------------- */
+    function toggleSortOrder() {
+      sortOrder = sortOrder === "desc" ? "asc" : "desc";
+      document.getElementById("sortLabel").textContent =
+        sortOrder === "desc" ? "いいね順（多→少）" : "いいね順（少→多）";
+
+      if (lastData) renderList(lastData);
+    }
+
+    /* -------------------------
+       🔥 画面描画
+    ------------------------- */
+    function renderList(data) {
+      if (!data) return;
+      lastData = data;
+
+      /* ランキング */
+      const topListBody = document.getElementById('topList');
+      const sortedAll = [...data]
+        .filter(s => s.votes > 0)
+        .sort((a, b) => b.votes - a.votes)
+        .slice(0, currentDisplayCount);
+
+      let rankingHtml = "";
+      sortedAll.forEach((song, i) => {
+        const crown = i < 3 ? ['🥇','🥈','🥉'][i] : `${i + 1}`;
+        rankingHtml += `
+          <tr style="${song.isDone ? 'opacity: 0.5; text-decoration: line-through;' : ''}">
+            <td width="40">${crown}</td>
+            <td><small>${song.artist}</small><br><strong>${song.title}</strong></td>
+            <td class="has-text-right"><span class="tag is-danger is-light">${song.votes}票</span></td>
+          </tr>`;
+      });
+      topListBody.innerHTML = rankingHtml || "<tr><td class='has-text-centered'>まだ投票はありません</td></tr>";
+
+      /* タブ生成 */
+      const groups = data.reduce((acc, obj) => {
+        acc[obj.artist] = acc[obj.artist] || [];
+        acc[obj.artist].push(obj);
+        return acc;
+      }, {});
+
+      const order = ["STU48","AKB48","SKE48","NMB48","HKT48","NGT48","乃木坂46","欅坂46","櫻坂46","けやき坂46","日向坂46","=LOVE","≠ME","その他"];
+
+      const tabContainer = document.getElementById('tabContainer');
+      tabContainer.innerHTML = order.filter(a => groups[a]).map(artist =>
+        `<div class="tab-item ${currentArtistFilter === artist ? 'is-active' : ''}"
+              onclick="filterByArtist('${artist}')">${artist}</div>`
+      ).join("");
+
+      /* 曲リスト */
+      const area = document.getElementById('listArea');
+      area.innerHTML = "";
+
+      if (groups[currentArtistFilter]) {
+        let html = `<table class="table is-fullwidth is-striped">`;
+
+        groups[currentArtistFilter]
+          .sort((a, b) => sortOrder === "desc" ? b.votes - a.votes : a.votes - b.votes)
+          .forEach(song => {
+            const safeTitle = song.title.replace(/'/g, "\\'");
+            html += `
+              <tr class="${song.isDone ? 'done-row' : ''}">
+                <td width="50%">${song.title}</td>
+
+                <td>
+                  <button class="button is-small is-danger is-outlined vote-btn"
+                    onclick="google.script.run.withSuccessHandler(renderList).voteSong('${safeTitle}')">
+                    ❤️ ${song.votes}
+                  </button>
+                </td>
+
+                <td class="has-text-centered">
+                  <input type="checkbox" ${song.isDone ? 'checked' : ''}
+                    onchange="google.script.run.withSuccessHandler(renderList).toggleDone('${safeTitle}', this.checked)">
+                  <p style="font-size: 0.6rem">済</p>
+                </td>
+
+                <td class="has-text-centered">
+                  <button class="button is-small is-danger is-light"
+                    onclick="deleteSong('${safeTitle}')">削除</button>
+                </td>
+              </tr>`;
+          });
+
+        area.innerHTML = html + `</table>`;
+      } else {
+        area.innerHTML = "<p class='has-text-centered p-5'>このグループに曲はまだありません。</p>";
+      }
+    }
+  </script>
+</body>
+</html>
